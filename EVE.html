@@ -1,0 +1,679 @@
+<head>
+<Title>EVE</Title>
+<script src="jquery.js"></script>
+<script type="text/javascript" src="js/jquery-1.11.0.min.js"></script>
+<script type="text/javascript" src="js/jquery.leanModal.min.js"></script>
+<link type="text/css" rel="stylesheet" href="css/style.css" />
+<script type="text/javascript" src="convex_hull.js"></script> 
+<style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+		
+      }
+	  
+	  body
+	  {
+	 background-color: #333;}
+      #map {
+        height: 93%;
+		width: 80%;
+      }
+	  
+	 #Menu
+	 {
+      height: 7%;
+	 float:top;
+	 background-color: #333;
+	 }
+	 
+	 #addInputForm, #viewInputForm
+	 {
+		float:right;
+		align: right;
+		margin: 0 0 10px 10px;
+		display: block;
+		background-color: #333;
+		color: white;
+	 }
+	 
+	 #inputForm
+	 {
+		background-color: #333;
+		display: block;
+		position: relative;
+		float:right;
+		z-index: 1;
+		width:20%;
+	 }
+	 
+	ul {
+		display: inline-block;
+		list-style-type: none;
+		margin: 0;
+		padding: 0;
+		overflow: hidden;
+		background-color: #333;
+	}
+
+	li {
+		float: left;
+	}
+
+	li a, li p {
+		display: block;
+		color: white;
+		text-align: center;
+		padding: 10px 50px;
+		text-decoration: none;
+	}
+
+
+	/* Change the link color to #111 (black) on hover */
+	a.Controls:hover {
+		background-color: #111;
+	}
+	
+	ul.Controls
+	{
+		float:right;
+	}
+
+	a.Title
+	{
+		font-size:150%;
+		font-stretch:expanded;
+	}
+
+	}
+    </style>
+</head>
+<body>
+<div id="Menu">
+<ul>
+	<li><a id="Clock">[CLOCK]</a></li>
+	<li><a class ="Title">EVE</a></li>
+</ul>
+<ul class="Controls">
+	<li id="view"><a >View</a></li>
+	<li id="add"><a >Add</a></li>
+	<li id="remove"><a >Remove</a></li>
+</ul>
+</div>
+
+<div id="inputForm">
+<ul>
+<li>
+<form id="addInputForm">
+<input type="checkbox" id="isArea" onclick="toggleDrawPolygon()">Area</input>
+<br>
+<select id="markerTypes" name="markerTypes">
+	<option value="Fire">Fire</option>
+	<option value="Plume">Plume Cloud</option>
+	<option value="Weather">Weather</option>
+	<option value="Flood">Flooding</option>
+	<option value="Car Accident">Car Accident</option>
+	<option value="Rescue Needed">Rescue Needed</option>
+	<option value="Other">Other</option>
+</select>
+<br>
+<textarea id="moreInformation" >More Information</textarea>
+<br>
+<button type="button" onclick="removeMarker()">Remove</button>
+</form>
+</li>
+<br>
+<li>
+<form id="viewInputForm">
+<button type="button" onclick="filterMarkers()">Refresh</button>
+<br>
+<input type="checkbox" id="plume" value="plume" checked>Plume Cloud<br>
+<input type="checkbox" id="weather" value="weather" checked>Weather<br>
+<input type="checkbox" id="flood" value="flood" checked>Flooding<br>
+<input type="checkbox" id="fires" value="fires" checked>Fires<br>
+<input type="checkbox" id="carAccident" value="carAccident" checked>Car Accidents<br>
+<input type="checkbox" id="rescueNeeded" value="rescueNeeded" checked>Rescue Needed<br>
+<input type="checkbox" id="other" value="other" checked>Other<br>
+<button onclick="" href="#modal" id="modal_trigger" type="button">Login</button>
+</form>
+</li>
+</div>
+
+<div id="map"></div>
+
+<div id="modal" class="popupContainer" style="display:none;">
+	<header class="popupHeader">
+		<span class="header_title">Login</span>
+		<span class="modal_close"><i class="fa fa-times"></i></span>
+	</header>
+	
+	<section class="popupBody">
+		
+		<!-- Username & Password Login form -->
+		<div class="user_login">
+			<form>
+				<label>Username</label>
+				<input id="username" type="text" autofocus/>
+				<br />
+
+				<label>Password</label>
+				<input id="password" type="password" />
+				<br />
+
+				<div class="action_btns">
+					<div class="one_half last"><a href="#" id="login" class="btn btn_red">Login</a></div>
+				</div>
+			</form>
+		</div>
+
+	</section>
+</div>
+
+<script>
+
+
+var d = new Date();
+document.getElementById("Clock").innerHTML = d.toUTCString();
+
+var map;
+var infoWindow;
+var update_timeout = null;
+
+var points = [];
+var polygon = null;
+var markers = []; //Array of Pointers
+var overlays = [];
+var numMarkers = 0;
+var overlayIndex = 0;
+
+// For Convex Hull algorithm
+var hullPoints = [];
+var hullPoints_size;
+var username = "";
+var password = "";
+
+var drawingPolygonMode = false;
+
+// Selected Marker for removing
+var selectedMarker = null;
+
+function initMap() {
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: {lat: 39.780521, lng: -84.063030},
+    zoom: 8
+  });
+  map.setZoom(15);
+  infoWindow = new google.maps.InfoWindow;
+  readDatabase();
+  map.addListener('click', function(e){
+	
+		update_timeout = setTimeout(function(){
+			//alert(document.getElementById("markerTypes").value);
+			var markerType = document.getElementById("markerTypes").value;
+			
+			//READ FROM THE DATABASE BEFORE WRITING! THAT WAY WE CAN SEE HOW MANY OVERLAYS THERE ARE!!!!!!
+			readDatabase();
+			
+			if(!drawingPolygonMode){
+				//alert(username + "," + password);
+				var params = "username=" + username + "&password=" + password + "&lat=" + e.latLng.lat() + "&long=" + e.latLng.lng() + "&type=" + document.getElementById("markerTypes").value + "&info=" + document.getElementById("moreInformation").value + "&overlayNumber=" + (-1);
+				getRequest("sqlAddRow.php", useOutput, throwError,params);
+				drawMarker(e.latLng, document.getElementById("markerTypes").value, document.getElementById("moreInformation").value, map);
+			}else{
+				points.push({lat:e.latLng.lat(), lng:e.latLng.lng()});
+				if(polygon === null){
+					var color = pickColor(document.getElementById("markerTypes").value);
+					polygon = new google.maps.Polygon({
+						paths: [{lat:e.latLng.lat(), lng:e.latLng.lng()}],
+						strokeColor: color,
+						strokeOpacity: 0.8,
+						strokeWeight: 2,
+						fillColor: color,
+						fillOpacity: 0.35
+					});
+					google.maps.event.addListener(polygon, 'click', function (event) {
+						infoWindow.setContent("<b>10-7-2015 10:20:32</b><br>More information");
+						infoWindow.setPosition(e.latLng);
+						infoWindow.open(map);
+					});
+					//polygon.addListener('click', function(e){
+						//infoWindow.setContent("<b>10-7-2015 10:20:32</b><br>More information");
+						//infoWindow.setPosition(e.latLng);
+			
+						//infoWindow.open(map);
+					//}
+					polygon.setMap(map);
+				} else {
+					var hullPoints = calcConvexHull(points);
+					polygon.setPath(hullPoints);
+				}
+			}
+			
+		}, 500);
+	});
+
+	map.addListener('dblclick', function(e){
+		clearTimeout(update_timeout);
+		
+		points.push({lat:e.latLng.lat(), lng:e.latLng.lng()});
+		if(polygon != null){
+			var hullPoints = calcConvexHull(points);
+			polygon.setPath(hullPoints);
+			overlays.push(polygon);
+			for(var i = 0; i < points.length; i++){
+				var latLng = points[i];
+				var params = "username=" + username + "&password=" + password + "&lat=" + latLng.lat + "&long=" + latLng.lng + "&type=" + document.getElementById("markerTypes").value + "&info=" + document.getElementById("moreInformation").value + "&overlayNumber=" + overlayIndex;
+				getRequest("sqlAddRow.php", useOutput, throwError,params);
+			}
+			polygon = null;
+			points = [];
+		}
+		map.setZoom(15);
+	});
+	
+	window.setInterval(readDatabase, 30000);
+	
+	/*var lastValidCenter = map.getCenter();
+	google.maps.event.addListener(map, 'center_changed', function() {
+		map.panTo(lastValidCenter);
+	});*/
+}
+
+function toggleDrawPolygon()
+{
+	if(document.getElementById("isArea").checked)
+	{
+		drawingPolygonMode = true;
+	}
+	else
+	{
+		drawingPolygonMode = false;
+	}
+}
+
+function drawPolygon(points, iconType, desc, map){
+		var color = pickColor(iconType);
+		var polygon = new google.maps.Polygon({
+				paths: points,
+				strokeColor: color,
+				strokeOpacity: 0.8,
+				strokeWeight: 2,
+				fillColor: color,
+				fillOpacity: 0.35,
+				_type: iconType,
+				_info: desc
+		});
+		polygon.addListener('click', function(event){
+			showInfo(event, polygon);
+		});
+/*		google.maps.event.addListener(polygon, 'click', function (event) {
+			infoWindow.setContent(polygon._info);
+			infoWindow.setPosition(event.latLng);
+			infoWindow.open(map);
+		});*/
+		polygon.setMap(map);
+		overlays.push(polygon);
+}
+
+function drawMarker(latLng, markerType, extraInfo, map){
+	if (markerType == 'Fire' || markerType == 'Explosion' ||
+		markerType == 'Car Accident' || markerType == 'Rescue Needed'){
+		var markerIcon = 'images/' + markerType +'.png';
+	}
+	else{
+		var markerIcon = 'images/Other.png';
+	}
+	var marker = new google.maps.Marker({ position:latLng, 
+								map:map,
+								title:"point",
+								_type: markerType,
+								icon: {url: markerIcon,
+									   scaledSize: new google.maps.Size(25, 50)},
+								_info: extraInfo});
+	marker.addListener("click", function(e){
+		showInfo(e, marker);
+	});
+	
+	markers.push(marker);
+}
+
+function showInfo(e, marker){
+	infoWindow.setContent("Type: " + marker._type + "<br><br>" + marker._info);
+	infoWindow.setPosition(e.latLng);
+	
+	infoWindow.open(map, marker);
+}
+
+
+function calcConvexHull(points)
+{
+	hullPoints = [];
+	// Sort the points by X, then by Y (required by the algorithm)
+	points.sort(sortPointY);
+	points.sort(sortPointX);
+	// Calculate the convex hull
+	// Takes: an (1) array of points with x() and y() methods defined
+	//          (2) Size of the points array
+	//          (3) Empty array to store the hull points
+	// Returns: The number of hull points, which may differ the the hull points array’s size
+	hullPoints_size = chainHull_2D(points, points.length, hullPoints);
+	return hullPoints;
+}
+
+
+// Filter the Markers based on type
+function filterMarkers(){
+	readDatabase(); // Read from Database
+
+	var plumeChecked = document.getElementById("plume").checked;
+	var weatherChecked = document.getElementById("weather").checked;
+	var floodChecked = document.getElementById("flood").checked;
+	var firesChecked = document.getElementById("fires").checked;
+	var carAccidentsChecked = document.getElementById("carAccident").checked;
+	var rescueChecked = document.getElementById("rescueNeeded").checked;
+	var otherChecked = document.getElementById("other").checked;
+	
+  for (var i = 0; i < markers.length; i++) {
+    var markertype = markers[i]._type;
+	switch(markertype)
+	{
+		case "Plume":
+			if(plumeChecked) 
+			{
+				markers[i].setMap(map);
+			}
+			else
+			{
+				markers[i].setMap(null);				
+			}
+			break;
+		case "Fire":
+			if(firesChecked) 
+			{
+				markers[i].setMap(map);
+			}
+			else
+			{
+				markers[i].setMap(null);				
+			}		
+			break;
+		case "Weather":
+			if(weatherChecked) 
+			{
+				markers[i].setMap(map);
+			}
+			else
+			{
+				markers[i].setMap(null);				
+			}
+			break;
+		case "Flood":
+			if(floodChecked) 
+			{
+				markers[i].setMap(map);
+			}
+			else
+			{
+				markers[i].setMap(null);				
+			}
+			break;
+		case "Car Accident":
+			if(carAccidentsChecked) 
+			{
+				markers[i].setMap(map);
+			}
+			else
+			{
+				markers[i].setMap(null);				
+			}
+			break;
+		case "Rescue Needed":
+			if(rescueChecked) 
+			{
+				markers[i].setMap(map);
+			}
+			else
+			{
+				markers[i].setMap(null);				
+			}
+			break;
+		case "Other":
+			if(otherChecked) 
+			{
+				markers[i].setMap(map);
+			}
+			else
+			{
+				markers[i].setMap(null);				
+			}
+			break;
+		default:
+			markers[i].setMap(map);
+			break;			
+	}	
+
+  }
+}
+
+// Gift Wrapping algorithm
+function jarvis(pointSet)
+{
+	var pointOnHull = "leftMostPoint";
+	var i = 0;
+	var P = [];
+	var endPoint = 1;
+	
+	do
+	{
+		P[i] = pointOnHull;
+		endPoint = pointSet[0];
+		for(var j =0; j < pointSet.length; j++)
+		{
+			if(endPoint == pointOnHull || leftOfLine(pointSet[j], P[i], endPoint))
+			{
+				endPoint = pointSet[j]; // found greater left turn, update endpoint
+			}
+		}
+		
+		i++; // increment i
+		pointOnHull = endPoint;
+	}while(endPoint != P[0]);
+}
+
+function leftOfLine(ptFromSet, ptHull, endPt)
+{
+	ptFromSet = ptHull = endPt = 0;
+	//STUB
+}
+
+function readDatabase(){
+	var params = "username="+ username + "&password=" + password;
+	getRequest("jsonPoints.php", readJson, throwError, params);
+}
+
+// Read JSON
+// TODO: Build test JSON object
+function readJson(arr)
+{
+	//alert(arr);
+	for (var i = 0; i < markers.length; i++) {
+		markers[i].setMap(null);
+	}
+	for (var i = 0; i < overlays.length; i++) {
+		overlays[i].setMap(null);
+	}
+	markers = [];
+	overlays = [];
+	if(typeof arr == "string"){
+        arr = JSON.parse(arr);
+    }
+	var i;
+	var pointMap = new Map();
+	for(i=0; i<arr.length;i++)
+	{
+		if(pointMap.get(arr[i].OverlayNumber) === undefined){
+			pointMap.set(arr[i].OverlayNumber, [arr[i].IconType, "<b>" + arr[i].TimeStamp + "</b><br>" + arr[i].ExtraInfo, {lat:parseFloat(arr[i].Latitude), lng:parseFloat(arr[i].Longitude)}]);
+		}else{
+			var temp = pointMap.get(arr[i].OverlayNumber);
+			if(arr[i].OverlayNumber == -1){
+				temp.push([{lat:parseFloat(arr[i].Latitude), lng:parseFloat(arr[i].Longitude)}, arr[i].IconType, "<b>" + arr[i].TimeStamp + "</b><br>" + arr[i].ExtraInfo]);
+			} else {
+				temp.push({lat:parseFloat(arr[i].Latitude), lng:parseFloat(arr[i].Longitude)});
+			}
+			pointMap.set(arr[i].OverlayNumber, temp);
+		}
+		//drawMarker({lat:parseFloat(arr[i].Latitude), lng:parseFloat(arr[i].Longitude)}, arr[i].IconType, "<b>" + arr[i].TimeStamp + "</b><br>" + arr[i].ExtraInfo, map);
+	}
+	for(var key of pointMap.keys()){
+		var value = pointMap.get(key);
+		if(key === '-1'){
+			for(i=0; i<value.length;i++){
+				drawMarker(value[i][0], value[i][1], value[i][2], value[i][3], map);
+			}
+		} else {
+			//alert(key + ":" + value);
+			var iconType = value[0];
+			var desc = value[1];
+			var points = calcConvexHull(value.slice(2));
+			drawPolygon(points, iconType, desc, map);
+		}
+	}
+	overlayIndex = overlays.length;
+	filterMarkers();
+}
+
+function useOutput(output){
+	//alert(output);
+}
+
+function throwError(){
+	alert("ERROR");
+}
+
+function getRequest(url, success, error, params){
+	var req = false;
+	//Create the object
+	try{
+		req = new XMLHttpRequest();
+	}catch(e){
+		//If you can't, try some other objects
+		try{
+			req= new ActiveXObject("Msxml2.XMLHTTP");
+		} catch (e) {
+			try {
+				req = new ActiveXObject("Microsoft.XMLHTTP");
+			} catch(e){
+				return false;
+			}
+		}
+	}
+	
+	//Make sure you have an object and some functions
+	if (!req) return false;
+	if (typeof success != 'function') success = function () {};
+	if (typeof error != 'function') error = function(){alert("ERROR");};
+	
+	//When the request returns, call either the success or failure
+	req.onreadystatechange = function(){
+		if(req.readyState == 4){
+			return req.status === 200 ? success(req.responseText) : error();
+		}
+	}
+	req.open("POST", url, true);
+	//alert(params + "," + url);
+    if(params != null){
+		req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+		req.setRequestHeader("Content-length", params.length);
+		req.setRequestHeader("Connection", "close");
+	}
+    req.send(params);
+	return req;
+}
+function pickColor(markerType)
+{
+	var color = "red";
+	switch(markerType)
+	{
+		case "Plume":
+			color = "gray";
+			break;
+		case "Fire":
+			color = 'red';	
+			break;
+		case "Weather":
+			color = "orange";
+			break;
+		case "Flooding":
+			color = "BlueViolet";
+			break;
+		case "Car Accident":
+			color = "blue";
+			break;
+		case "Rescue Needed":
+			color = "green";
+			break;
+		case "Explosion":
+			color = "yellow";
+			break;
+		case "Other":
+			color = "gray";
+			break;
+		default:
+			markers[i].setMap(map);
+			break;			
+	}	
+	
+	return color;
+}
+// Remove Marker
+function removeMarker()
+{
+	selectedMarker.setMap(null);
+	// Remove from list:
+	markers = markers.filter(removeMarker_helper);
+	
+	// Code to remove from database:
+    var latLng = selectedMarker.getPosition();
+	var params = "username=" + username + "&password=" + password + "&lat=" + latLng.lat + "&long=" + latLng.lng ;
+	getRequest("deletePoint.php", useOutput, throwError, params);
+	
+	//readDatabase();
+}
+
+function removeMarker_helper(marker)
+{
+	return marker != selectedMarker;
+}
+
+//ADDED
+	$("#modal_trigger").leanModal({top : 200, overlay : 0.6, closeButton: ".modal_close" });
+
+	$(function(){
+		// Calling Login Form
+		$("#login").click(function(){
+			
+			username=document.getElementById("username").value;
+			password=document.getElementById("password").value;
+			//alert(username + "," + password);
+			readDatabase();
+			$("#lean_overlay").fadeOut(200);
+                $("#modal").css({
+                    "display": "none"
+                });
+				return false;
+		});
+
+	});
+//END ADDED
+$(document).ready(function(){
+	$('#modal_trigger').trigger('click');
+});
+
+</script>
+
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBPxhgAw4EJA7mzljiO6ViJ3EnbFlTSZy4&callback=initMap"
+async defer>
+
+</script>
+</body>
